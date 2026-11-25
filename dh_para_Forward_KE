@@ -1,0 +1,48 @@
+import sympy as sp
+import numpy as np
+from sympy.physics.vector import dynamicsymbols
+
+# 1. Initialize LaTeX printing for beautiful rendering in Google Colab
+sp.init_printing()
+
+# 2. Define time and generalized joint coordinates (state variables)
+t = sp.symbols('t')
+q1, q2 ,q3= dynamicsymbols('q1 q2 q3')
+r1, r2, r3 = dynamicsymbols('r1 r2 r3)')#Center of Mass of Link
+
+# Automatically define first derivatives (velocities) and second derivatives (accelerations)
+q1_d, q2_d, q3_d = sp.diff(q1, t), sp.diff(q2, t), sp.diff(q3, t)
+q1_dd, q2_dd, q3_dd = sp.diff(q1, t, 2), sp.diff(q2, t, 2), sp.diff(q3, t, 2)
+
+# 3. Define structural constants: DH parameters 
+l1, l2, l3 = sp.symbols('l1, l2 l3') #Length
+
+# 4. Define standard Denavit-Hartenberg (DH) homogeneous transformation matrix function
+# This automatically handles the shifting and twisting of the XYZ coordinate frame for each joint.
+def dh_matrix(d, theta, a, alpha):
+    return sp.Matrix([
+        [sp.cos(theta), -sp.sin(theta)*sp.cos(alpha),  sp.sin(theta)*sp.sin(alpha), a*sp.cos(theta)],
+        [sp.sin(theta),  sp.cos(theta)*sp.cos(alpha), -sp.cos(theta)*sp.sin(alpha), a*sp.sin(theta)],
+        [0,              sp.sin(alpha),               sp.cos(alpha),              d],
+        [0,              0,                           0,                          1]
+    ])
+
+# 5. Kinematics: Establish joint frames and find Center of Mass (CoM) coordinates in global 3D space
+# Assume Joint 1 rotates around global Z-axis; Joint 2 is twisted by 90 degrees (pi/2) to swing up/down
+
+l1, l2, l3 = 0.344, 0.300, 0.366         # Link lengths (m) #I3(with spring design)
+
+
+A01 = dh_matrix(l1, q1, 0, sp.pi/2) #from joint 0 to 1
+A12 = dh_matrix(0, q2, l2, 0)
+A23 = dh_matrix(0 , q3, l3, 0)
+T01 = A01
+T02 = sp.simplify(A01*A12)
+T03 = sp.simplify(A01*A12*A23)
+
+# Output each edge coordinate
+x1, y1, z1, _ = T01.col(3)
+x2, y2, z2, _ = T02.col(3)
+x3, y3, z3, _ = T03.col(3)
+
+
