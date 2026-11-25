@@ -1,0 +1,102 @@
+import sympy as sp
+import numpy as np
+from sympy.physics.vector import dynamicsymbols
+
+# 1. Initialize LaTeX printing for beautiful rendering in Google Colab
+sp.init_printing()
+
+# 2. Define time and generalized joint coordinates (state variables)
+t = sp.symbols('t')
+q1, q2 ,q3= dynamicsymbols('q1 q2 q3')
+r1, r2, r3 = dynamicsymbols('r1 r2 r3)')#Center of Mass of Link
+
+# Automatically define first derivatives (velocities) and second derivatives (accelerations)
+q1_d, q2_d, q3_d = sp.diff(q1, t), sp.diff(q2, t), sp.diff(q3, t)
+q1_dd, q2_dd, q3_dd = sp.diff(q1, t, 2), sp.diff(q2, t, 2), sp.diff(q3, t, 2)
+
+# 3. Define structural constants: DH parameters (a1, a2), mass (m1, m2), CoM radii (r1, r2), gravity (g)
+a1, a2, a3, r1, r2, r3, m1, m2, m3, g = sp.symbols('a1 a2 a3 r1 r2 r3 m1 m2 m3 g')
+l1, l2, l3 = sp.symbols('l1, l2 l3') #Length
+I1, I2, I3 = sp.symbols('I1 I2 I3')  # Moments of inertia about their respective rotation axes
+
+# 4. Define standard Denavit-Hartenberg (DH) homogeneous transformation matrix function
+# This automatically handles the shifting and twisting of the XYZ coordinate frame for each joint.
+def dh_matrix(d, theta, a, alpha):
+    return sp.Matrix([
+        [sp.cos(theta), -sp.sin(theta)*sp.cos(alpha),  sp.sin(theta)*sp.sin(alpha), a*sp.cos(theta)],
+        [sp.sin(theta),  sp.cos(theta)*sp.cos(alpha), -sp.cos(theta)*sp.sin(alpha), a*sp.sin(theta)],
+        [0,              sp.sin(alpha),               sp.cos(alpha),              d],
+        [0,              0,                           0,                          1]
+    ])
+
+# 5. Kinematics: Establish joint frames and find Center of Mass (CoM) coordinates in global 3D space
+# Assume Joint 1 rotates around global Z-axis; Joint 2 is twisted by 90 degrees (pi/2) to swing up/down
+
+l1, l2, l3 = 0.344, 0.300, 0.320          # Link lengths (m) #I3(without spring design)
+r1, r2, r3 = 0.143, 0.124, 0.150          # CoM distances (m)
+I1, I2, I3 = 0.000547, 0.001485/2, 0.002956/2 # Moments of inertia (kg*m^2)
+m1 = 1.266    # kg (Base cover + Extension + Joint Base)
+m2 = 0.80441/2  # kg (Joint Moveable + Link1 + Joint Mount)
+m3 = 0.44856/2 # kg (Link 2 without Spring design)
+g = 9.81      # m/s^2
+
+A01 = dh_matrix(l1, q1, 0, sp.pi/2) #from joint 0 to 1
+A12 = dh_matrix(0, q2+sp.pi/2, l2, 0)
+A23 = dh_matrix(0 , q3, l3, 0)
+T01 = A01
+T02 = sp.simplify(A01*A12)
+T03 = sp.simplify(A01*A12*A23)
+
+T_com1 = dh_matrix(r1, q1, 0, sp.pi/2)
+T_com2 = sp.simplify(T01 * dh_matrix(0, q2+sp.pi/2, r2, 0))
+T_com3 = sp.simplify(T02 * dh_matrix(0, q3, r3, 0))
+
+x1, y1, z1, _ = T_com1.col(3)
+x2, y2, z2, _ = T_com2.col(3)
+x3, y3, z3, _ = T_com3.col(3)
+display(x1,y1,z1)
+display(x2, y2, z2)
+display(x3, y3, z3)
+
+v1_sq = sp.simplify(sp.diff(x1, t)**2 + sp.diff(y1, t)**2 +sp.diff(z1, t)**2)
+v2_sq = sp.simplify(sp.diff(x2, t)**2 + sp.diff(y2, t)**2 +sp.diff(z2, t)**2)
+v3_sq= sp.simplify(sp.diff(x3, t)**2 + sp.diff(y3, t)**2 +sp.diff(z3, t)**2)
+display(v3_sq)
+
+T = (sp.Rational(1, 2)*m1*v1_sq + sp.Rational(1, 2)*I1*q1_d**2 +
+     sp.Rational(1, 2)*m2*v2_sq + sp.Rational(1, 2)*I2*q2_d**2 +
+     sp.Rational(1, 2)*m3*v3_sq + sp.Rational(1, 2)*I3*(q2_d + q3_d)**2)
+
+U = g * (m1*z1 + m2*z2 + m3*z3)
+L = T - U
+display(L)
+
+tau1 = sp.simplify(sp.diff(sp.diff(L, q1_d), t) - sp.diff(L, q1))
+tau2 = sp.simplify(sp.diff(sp.diff(L, q2_d), t) - sp.diff(L, q2))
+tau3 = sp.simplify(sp.diff(sp.diff(L, q3_d), t) - sp.diff(L, q3))
+display(tau1)
+
+# 6. Convert symbolic equations into fast NumPy functions
+state_vars = (q1, q2, q3, q1_d, q2_d, q3_d, q1_dd, q2_dd, q3_dd)
+f_tau1 = sp.lambdify(state_vars, tau1, 'numpy')
+f_tau2 = sp.lambdify(state_vars, tau2, 'numpy')
+f_tau3 = sp.lambdify(state_vars, tau3, 'numpy')
+
+angles_deg = np.linspace(-90, 90, 100)
+angles_rad = np.deg2rad(angles_deg)
+Q2, Q3 = np.meshgrid(angles_rad, angles_rad, indexing='ij')
+Q1 = np.zeros_like(Q2)
+
+
+vel = 1.5   # Angular velocity (rad/s)
+acc = 2 # Angular acceleration (rad/s^2)
+
+T1_grid = np.abs(f_tau1(Q1, Q2, Q3, vel, vel, vel, acc, acc, acc))
+T2_grid = np.abs(f_tau2(Q1, Q2, Q3, vel, vel, vel, acc, acc, acc))
+T3_grid = np.abs(f_tau3(Q1, Q2, Q3, vel, vel, vel, acc, acc, acc))
+
+for name, grid in [("Joint 1 (Base)", T1_grid), ("Joint 2 (Shoulder)", T2_grid), ("Joint 3 (Elbow)", T3_grid)]:
+    max_val = np.max(grid)
+    i_max, j_max = np.unravel_index(np.argmax(grid), grid.shape)
+    print(f"{name} Max Torque: {max_val:.3f} N·m  (at q2 = {angles_deg[i_max]:.1f}°, q3 = {angles_deg[j_max]:.1f}°)")
+    print(f'{name} Torque with safety factor 1.8: {1.8*max_val:.3f} N.m')
